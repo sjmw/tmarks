@@ -1,5 +1,7 @@
 import { useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import { X, CheckCircle, AlertCircle, Info, AlertTriangle } from 'lucide-react'
+import { Z_INDEX } from '@/lib/constants/z-index'
 
 export type ToastType = 'success' | 'error' | 'info' | 'warning'
 
@@ -20,32 +22,37 @@ const ICONS = {
 
 const COLORS = {
   success: {
-    bg: 'bg-success/10',
-    border: 'border-success/20',
+    bg: 'toast-surface',
+    bgOverlay: 'bg-success/10',
+    border: 'border-success',
     icon: 'text-success',
-    text: 'text-success-foreground',
+    text: 'text-foreground',
   },
   error: {
-    bg: 'bg-destructive/10',
-    border: 'border-destructive/20',
+    bg: 'toast-surface',
+    bgOverlay: 'bg-destructive/10',
+    border: 'border-destructive',
     icon: 'text-destructive',
-    text: 'text-destructive-foreground',
+    text: 'text-foreground',
   },
   info: {
-    bg: 'bg-primary/10',
-    border: 'border-primary/20',
+    bg: 'toast-surface',
+    bgOverlay: 'bg-primary/10',
+    border: 'border-primary',
     icon: 'text-primary',
     text: 'text-foreground',
   },
   warning: {
-    bg: 'bg-warning/10',
-    border: 'border-warning/20',
+    bg: 'toast-surface',
+    bgOverlay: 'bg-warning/10',
+    border: 'border-warning',
     icon: 'text-warning',
-    text: 'text-warning-foreground',
+    text: 'text-foreground',
   },
 }
 
 export function Toast({ id, type, message, duration = 3000, onClose }: ToastProps) {
+  const { t } = useTranslation('common')
   const Icon = ICONS[type]
   const colors = COLORS[type]
 
@@ -61,13 +68,16 @@ export function Toast({ id, type, message, duration = 3000, onClose }: ToastProp
 
   return (
     <div
-      className={`flex items-start gap-3 p-4 rounded-lg border-2 shadow-lg ${colors.bg} ${colors.border} min-w-[320px] max-w-md animate-slide-in`}
+      className={`relative flex items-start gap-3 p-4 rounded-lg border-2 shadow-lg ${colors.bg} ${colors.border} min-w-[320px] max-w-md animate-slide-in backdrop-blur-sm overflow-hidden`}
     >
-      <Icon className={`w-5 h-5 ${colors.icon} flex-shrink-0 mt-0.5`} />
-      <p className={`flex-1 text-sm ${colors.text}`}>{message}</p>
+      <div className={`absolute inset-0 rounded-lg ${colors.bgOverlay} z-0 pointer-events-none`}></div>
+      
+      <Icon className={`relative z-10 w-5 h-5 ${colors.icon} flex-shrink-0 mt-0.5`} />
+      <p className={`relative z-10 flex-1 text-sm font-medium ${colors.text}`}>{message}</p>
       <button
         onClick={() => onClose(id)}
-        className={`${colors.icon} hover:opacity-70 transition-opacity flex-shrink-0`}
+        className={`relative z-10 ${colors.icon} hover:opacity-70 transition-opacity flex-shrink-0`}
+        aria-label={t('button.close')}
       >
         <X className="w-5 h-5" />
       </button>
@@ -77,11 +87,10 @@ export function Toast({ id, type, message, duration = 3000, onClose }: ToastProp
 
 export function ToastContainer({ toasts, onClose }: { toasts: ToastProps[]; onClose: (id: string) => void }) {
   return (
-    <div className="fixed top-4 right-4 flex flex-col gap-2" style={{ zIndex: 300 }}>
+    <div className="fixed top-4 right-4 flex flex-col gap-2" style={{ zIndex: Z_INDEX.TOAST }}>
       {toasts.map((toast) => (
         <Toast key={toast.id} {...toast} onClose={onClose} />
       ))}
     </div>
   )
 }
-

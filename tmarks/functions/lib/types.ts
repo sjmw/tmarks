@@ -1,13 +1,27 @@
 export interface Env {
   DB: D1Database
-  RATE_LIMIT_KV?: KVNamespace // Optional for development
-  PUBLIC_SHARE_KV?: KVNamespace // Optional cache for public share pages
+  TMARKS_KV?: KVNamespace // 统一缓存（公开分享、速率限制等）
+  SNAPSHOTS_BUCKET?: R2Bucket // R2 bucket for bookmark snapshots
+  R2_PUBLIC_URL?: string // （可选）封面图使用 R2 存储时的对外访问域名（如 https://r2.example.com）
+  R2_MAX_TOTAL_BYTES?: string // R2 总存储配额（字节），可选；不配置或 <= 0 表示不限制
+  CORS_ALLOWED_ORIGINS?: string // CORS 允许的源列表（逗号分隔，如 https://example.com,https://app.example.com）
   ALLOW_REGISTRATION?: string
   JWT_SECRET: string
   ENCRYPTION_KEY: string
   ENVIRONMENT?: string // 'development' | 'production'
   JWT_ACCESS_TOKEN_EXPIRES_IN?: string
   JWT_REFRESH_TOKEN_EXPIRES_IN?: string
+  
+  // 缓存配置
+  CACHE_LEVEL?: string // '0' | '1' | '2' | '3' | 'none' | 'minimal' | 'standard' | 'aggressive'
+  ENABLE_KV_CACHE?: string // 'true' | 'false'
+  CACHE_TTL_DEFAULT_LIST?: string
+  CACHE_TTL_TAG_FILTER?: string
+  CACHE_TTL_SEARCH?: string
+  CACHE_TTL_PUBLIC_SHARE?: string
+  ENABLE_MEMORY_CACHE?: string // 'true' | 'false'
+  MEMORY_CACHE_MAX_AGE?: string
+  CACHE_DEBUG?: string // 'true' | 'false'
 }
 
 export interface User {
@@ -26,11 +40,15 @@ export interface Bookmark {
   url: string
   description: string | null
   cover_image: string | null
+  favicon: string | null
   is_pinned: boolean
   is_archived: boolean
   is_public: boolean
   click_count: number
   last_clicked_at: string | null
+  has_snapshot?: boolean
+  latest_snapshot_at?: string | null
+  snapshot_count?: number
   created_at: string
   updated_at: string
   deleted_at: string | null

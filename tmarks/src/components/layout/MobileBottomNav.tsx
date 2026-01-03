@@ -4,42 +4,45 @@
  */
 
 import { useNavigate, useLocation } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import { BookOpen, Layers, Database, Download } from 'lucide-react'
+import { Z_INDEX } from '@/lib/constants/z-index'
 
 interface NavItem {
   id: string
-  label: string
+  labelKey: string
   icon: React.ComponentType<{ className?: string }>
   path: string
   badge?: number
 }
 
 export function MobileBottomNav() {
+  const { t } = useTranslation('common')
   const navigate = useNavigate()
   const location = useLocation()
 
   const navItems: NavItem[] = [
     {
       id: 'bookmarks',
-      label: '书签',
+      labelKey: 'nav.bookmarks',
       icon: BookOpen,
       path: '/'
     },
     {
       id: 'tab-groups',
-      label: '标签页',
+      labelKey: 'nav.tabGroups',
       icon: Layers,
       path: '/tab'
     },
     {
       id: 'data',
-      label: '数据',
+      labelKey: 'nav.data',
       icon: Database,
       path: '/import-export'
     },
     {
       id: 'extension',
-      label: '插件',
+      labelKey: 'nav.extension',
       icon: Download,
       path: '/extension'
     }
@@ -53,7 +56,7 @@ export function MobileBottomNav() {
   }
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 sm:hidden" style={{ zIndex: 20 }}>
+    <div className="fixed bottom-0 left-0 right-0 bg-card border-t border-border sm:hidden" style={{ zIndex: Z_INDEX.MOBILE_BOTTOM_NAV }}>
       <div className="grid grid-cols-4 h-16">
         {navItems.map((item) => {
           const Icon = item.icon
@@ -65,24 +68,24 @@ export function MobileBottomNav() {
               onClick={() => navigate(item.path)}
               className={`flex flex-col items-center justify-center space-y-1 px-2 py-2 transition-colors duration-200 touch-manipulation ${
                 active
-                  ? 'text-blue-600 dark:text-blue-400'
-                  : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                  ? 'text-primary'
+                  : 'text-muted-foreground hover:text-foreground'
               }`}
             >
               <div className="relative">
                 <Icon className={`h-5 w-5 ${
-                  active ? 'text-blue-600 dark:text-blue-400' : ''
+                  active ? 'text-primary' : ''
                 }`} />
                 {item.badge && item.badge > 0 && (
-                  <span className="absolute -top-1 -right-1 h-4 w-4 bg-red-500 text-white text-xs rounded-full flex items-center justify-center">
+                  <span className="absolute -top-1 -right-1 h-4 w-4 bg-destructive text-destructive-foreground text-xs rounded-full flex items-center justify-center">
                     {item.badge > 99 ? '99+' : item.badge}
                   </span>
                 )}
               </div>
               <span className={`text-xs font-medium ${
-                active ? 'text-blue-600 dark:text-blue-400' : ''
+                active ? 'text-primary' : ''
               }`}>
-                {item.label}
+                {t(item.labelKey)}
               </span>
             </button>
           )
@@ -90,7 +93,7 @@ export function MobileBottomNav() {
       </div>
       
       {/* 安全区域适配 */}
-      <div className="h-safe-area-inset-bottom bg-white dark:bg-gray-800" />
+      <div className="h-safe-area-inset-bottom bg-card" />
     </div>
   )
 }
@@ -124,8 +127,8 @@ export function FloatingActionButton({
   const baseClasses = 'fixed bottom-20 right-4 w-14 h-14 rounded-full shadow-lg flex items-center justify-center transition-all duration-200 touch-manipulation z-40 sm:hidden'
   
   const variantClasses = {
-    primary: 'bg-blue-600 hover:bg-blue-700 text-white',
-    secondary: 'bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-600'
+    primary: 'bg-primary hover:bg-primary/90 text-primary-foreground',
+    secondary: 'bg-card hover:bg-muted text-foreground border border-border'
   }
 
   return (
@@ -158,7 +161,7 @@ export function SwipeHint({ direction, text, className = '' }: SwipeHintProps) {
   }
 
   return (
-    <div className={`flex items-center space-x-2 text-gray-500 dark:text-gray-400 sm:hidden ${className}`}>
+    <div className={`flex items-center space-x-2 text-muted-foreground sm:hidden ${className}`}>
       <div className={`w-4 h-4 ${directionClasses[direction]}`}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
           <path d="M7 13l3 3 7-7" />
@@ -236,7 +239,7 @@ export function MobileModal({
         </div>
         
         {/* 安全区域适配 */}
-        <div className="h-safe-area-inset-bottom bg-white dark:bg-gray-800" />
+        <div className="h-safe-area-inset-bottom bg-card" />
       </div>
     </div>
   )

@@ -57,7 +57,7 @@ export const bookmarksService = {
   /**
    * 恢复已删除的书签
    */
-  async restoreBookmark(id: number) {
+  async restoreBookmark(id: string) {
     const response = await apiClient.put<{ bookmark: Bookmark }>(`/bookmarks/${id}`)
     return response.data!.bookmark
   },
@@ -79,12 +79,65 @@ export const bookmarksService = {
   },
 
   /**
+   * 获取书签统计数据
+   */
+  async getStatistics(params: {
+    granularity: 'day' | 'week' | 'month' | 'year'
+    startDate: string
+    endDate: string
+  }) {
+    const { granularity, startDate, endDate } = params
+    const response = await apiClient.get(
+      `/bookmarks/statistics?granularity=${granularity}&start_date=${startDate}&end_date=${endDate}`
+    )
+    return response.data
+  },
+
+  /**
    * 检查 URL 是否已存在
    */
   async checkUrlExists(url: string) {
     const response = await apiClient.get<{ exists: boolean; bookmark?: Bookmark }>(
       `/bookmarks/check-url?url=${encodeURIComponent(url)}`
     )
+    return response.data!
+  },
+
+  /**
+   * 获取回收站书签列表
+   */
+  async getTrash(params?: { page_size?: number; page_cursor?: string }) {
+    const searchParams = new URLSearchParams()
+    if (params?.page_size) searchParams.set('page_size', params.page_size.toString())
+    if (params?.page_cursor) searchParams.set('page_cursor', params.page_cursor)
+    
+    const query = searchParams.toString()
+    const endpoint = query ? `/bookmarks/trash?${query}` : '/bookmarks/trash'
+    
+    const response = await apiClient.get<BookmarksResponse>(endpoint)
+    return response.data!
+  },
+
+  /**
+   * 从回收站恢复书签
+   */
+  async restoreFromTrash(id: string) {
+    const response = await apiClient.patch<{ bookmark: Bookmark }>(`/bookmarks/${id}/restore`, {})
+    return response.data!.bookmark
+  },
+
+  /**
+   * 永久删除书签
+   */
+  async permanentDelete(id: string) {
+    await apiClient.delete(`/bookmarks/${id}/permanent`)
+  },
+
+  /**
+   * 清空回收站
+   */
+  async emptyTrash() {
+    const response = await apiClient.delete<{ message: string; count: number }>('/bookmarks/trash/empty')
     return response.data!
   },
 }

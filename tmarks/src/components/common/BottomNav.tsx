@@ -1,39 +1,33 @@
 import { Link, useLocation } from 'react-router-dom'
-import { Layers, CheckSquare, BarChart3, Trash2 } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
+import { Layers, CheckSquare, Trash2 } from 'lucide-react'
 
 interface NavItem {
   path: string
   icon: React.ReactNode
-  label: string
+  labelKey: string
 }
 
 const navItems: NavItem[] = [
   {
     path: '/tab',
     icon: <Layers className="w-5 h-5" />,
-    label: '全部',
+    labelKey: 'nav.all',
   },
   {
     path: '/tab/todo',
     icon: <CheckSquare className="w-5 h-5" />,
-    label: '待办',
-  },
-  {
-    path: '/tab/statistics',
-    icon: <BarChart3 className="w-5 h-5" />,
-    label: '统计',
+    labelKey: 'nav.todo',
   },
   {
     path: '/tab/trash',
     icon: <Trash2 className="w-5 h-5" />,
-    label: '回收站',
+    labelKey: 'nav.trash',
   },
 ]
 
-/**
- * 移动端底部导航栏
- */
 export function BottomNav() {
+  const { t } = useTranslation('common')
   const location = useLocation()
 
   return (
@@ -58,7 +52,7 @@ export function BottomNav() {
               <div className={`transition-transform ${isActive ? 'scale-110' : ''}`}>
                 {item.icon}
               </div>
-              <span className="text-xs mt-1 font-medium">{item.label}</span>
+              <span className="text-xs mt-1 font-medium">{t(item.labelKey)}</span>
             </Link>
           )
         })}
@@ -66,4 +60,3 @@ export function BottomNav() {
     </nav>
   )
 }
-

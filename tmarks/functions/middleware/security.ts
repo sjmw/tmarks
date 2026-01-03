@@ -14,10 +14,15 @@ export const securityHeaders: PagesFunction = async (context) => {
   // 创建新的响应头
   const newHeaders = new Headers(response.headers)
   
+  // 检查是否是快照查看路径（这些路径需要宽松的 CSP）
+  const url = new URL(context.request.url)
+  const isSnapshotView = url.pathname.includes('/snapshots/') && 
+                         (url.pathname.includes('/view') || url.searchParams.has('sig'))
+  
   // 安全头配置
   const securityHeaders = {
-    // 防止点击劫持
-    'X-Frame-Options': 'DENY',
+    // 防止点击劫持（快照查看除外）
+    ...(!isSnapshotView && { 'X-Frame-Options': 'DENY' }),
     
     // 防止 MIME 类型嗅探
     'X-Content-Type-Options': 'nosniff',
@@ -31,18 +36,20 @@ export const securityHeaders: PagesFunction = async (context) => {
     // 权限策略
     'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=()',
     
-    // 内容安全策略
-    'Content-Security-Policy': [
-      "default-src 'self'",
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval'", // React 需要 unsafe-inline
-      "style-src 'self' 'unsafe-inline'", // Tailwind 需要 unsafe-inline
-      "img-src 'self' data: https:",
-      "font-src 'self' data:",
-      "connect-src 'self' https:",
-      "frame-ancestors 'none'",
-      "base-uri 'self'",
-      "form-action 'self'"
-    ].join('; '),
+    // 内容安全策略（快照查看使用宽松策略）
+    ...(!isSnapshotView && {
+      'Content-Security-Policy': [
+        "default-src 'self'",
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval'", // React 需要 unsafe-inline
+        "style-src 'self' 'unsafe-inline'", // Tailwind 需要 unsafe-inline
+        "img-src 'self' data: https:",
+        "font-src 'self' data:",
+        "connect-src 'self' https:",
+        "frame-ancestors 'none'",
+        "base-uri 'self'",
+        "form-action 'self'"
+      ].join('; ')
+    }),
     
     // HSTS (仅在 HTTPS 环境下)
     ...(context.request.url.startsWith('https://') && {
@@ -50,7 +57,7 @@ export const securityHeaders: PagesFunction = async (context) => {
     })
   }
   
-  // 添加安全头
+  // 添加安全头（跳过 undefined 值）
   Object.entries(securityHeaders).forEach(([key, value]) => {
     if (value) {
       newHeaders.set(key, value)
@@ -68,11 +75,14 @@ export const securityHeaders: PagesFunction = async (context) => {
  * CORS 配置中间件
  */
 export const corsHeaders: PagesFunction = async (context) => {
+  // 从环境变量获取允许的源
+  const allowedOriginsEnv = (context.env as { CORS_ALLOWED_ORIGINS?: string })?.CORS_ALLOWED_ORIGINS
+
   // 处理预检请求
   if (context.request.method === 'OPTIONS') {
     return new Response(null, {
       headers: {
-        'Access-Control-Allow-Origin': getAllowedOrigin(context.request),
+        'Access-Control-Allow-Origin': getAllowedOrigin(context.request, allowedOriginsEnv),
         'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
         'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-API-Key',
         'Access-Control-Allow-Credentials': 'true',
@@ -83,9 +93,9 @@ export const corsHeaders: PagesFunction = async (context) => {
 
   const response = await context.next()
   const newHeaders = new Headers(response.headers)
-  
+
   // 添加 CORS 头
-  newHeaders.set('Access-Control-Allow-Origin', getAllowedOrigin(context.request))
+  newHeaders.set('Access-Control-Allow-Origin', getAllowedOrigin(context.request, allowedOriginsEnv))
   newHeaders.set('Access-Control-Allow-Credentials', 'true')
   newHeaders.set('Vary', 'Origin')
   
@@ -98,24 +108,52 @@ export const corsHeaders: PagesFunction = async (context) => {
 
 /**
  * 获取允许的源
+ * @param request 请求对象
+ * @param allowedOriginsEnv 环境变量中的允许源列表（逗号分隔）
  */
-function getAllowedOrigin(request: Request): string {
+function getAllowedOrigin(request: Request, allowedOriginsEnv?: string): string {
   const origin = request.headers.get('Origin')
-  
-  // 允许的源列表
-  const allowedOrigins = [
+
+  // 默认允许的源列表（开发环境）
+  const defaultOrigins = [
     'http://localhost:5173',
     'http://localhost:3000',
-    'https://tmarks.pages.dev',
-    // 添加你的生产域名
   ]
-  
+
+  // 从环境变量解析允许的源（生产环境配置）
+  const envOrigins = allowedOriginsEnv
+    ? allowedOriginsEnv.split(',').map(o => o.trim()).filter(Boolean)
+    : []
+
+  // 合并默认和环境变量中的源
+  const allowedOrigins = [...defaultOrigins, ...envOrigins]
+
+  // 如果是 Chrome 扩展的请求，允许所有 chrome-extension:// 来源
+  if (origin && origin.startsWith('chrome-extension://')) {
+    return origin
+  }
+
+  // 如果是 Edge 扩展的请求，允许所有 extension:// 来源
+  if (origin && origin.startsWith('extension://')) {
+    return origin
+  }
+
+  // 如果是 Firefox 扩展的请求，允许所有 moz-extension:// 来源
+  if (origin && origin.startsWith('moz-extension://')) {
+    return origin
+  }
+
   if (origin && allowedOrigins.includes(origin)) {
     return origin
   }
-  
+
+  // 如果没有 Origin 头（可能是服务器端请求或扩展请求），返回 *
+  if (!origin) {
+    return '*'
+  }
+
   // 默认返回第一个允许的源
-  return allowedOrigins[0]
+  return allowedOrigins[0] || '*'
 }
 
 /**

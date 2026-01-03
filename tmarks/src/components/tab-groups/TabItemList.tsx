@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { TabItem } from './TabItem'
 import type { TabGroupItem } from '@/lib/types'
 import {
@@ -13,7 +14,7 @@ interface TabItemListProps {
   batchMode: boolean
   editingItemId: string | null
   editingTitle: string
-  onItemClick: (item: TabGroupItem, e: React.MouseEvent) => void
+  onItemClick: (item: TabGroupItem, e: React.MouseEvent | React.ChangeEvent<HTMLInputElement>) => void
   onEditItem: (item: TabGroupItem) => void
   onSaveEdit: (groupId: string, itemId: string) => void
   onTogglePin: (groupId: string, itemId: string, currentPinned: number) => void
@@ -44,10 +45,12 @@ export function TabItemList({
   setEditingTitle,
   extractDomain,
 }: TabItemListProps) {
+  const { t } = useTranslation('tabGroups')
+  
   if (!items || items.length === 0) {
     return (
       <div className="text-center py-8 text-muted-foreground">
-        此标签页组没有标签页
+        {t('message.noTabsInGroup')}
       </div>
     )
   }

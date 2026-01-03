@@ -18,10 +18,14 @@ const deployDir = path.join(__dirname, '../.deploy');
 
 console.log('🚀 准备Cloudflare Pages部署...');
 
-// 清理旧的部署目录
+// 清理旧的部署目录（尝试删除，失败则跳过）
 if (fs.existsSync(deployDir)) {
-  fs.rmSync(deployDir, { recursive: true });
-  console.log('✓ 清理旧部署目录');
+  try {
+    fs.rmSync(deployDir, { recursive: true, force: true });
+    console.log('✓ 清理旧部署目录');
+  } catch (error) {
+    console.log('⚠ 无法删除旧目录，将覆盖文件');
+  }
 }
 
 // 创建部署目录
@@ -37,7 +41,7 @@ const targetFunctionsDir = path.join(deployDir, 'functions');
 copyDir(functionsDir, targetFunctionsDir);
 
 console.log('✅ 部署准备完成!');
-console.log(`📁 部署目录: ${deployDir}`);
+console.log(`� 部署目录库: ${deployDir}`);
 
 /**
  * 递归复制目录
@@ -50,6 +54,12 @@ function copyDir(src, dest) {
   const entries = fs.readdirSync(src, { withFileTypes: true });
 
   for (const entry of entries) {
+    // 跳过废弃的备份目录
+    if (entry.name.startsWith('_deprecated')) {
+      console.log(`⏭ 跳过废弃目录: ${entry.name}`);
+      continue;
+    }
+
     const srcPath = path.join(src, entry.name);
     const destPath = path.join(dest, entry.name);
 

@@ -26,31 +26,39 @@ html {
   border: 1px solid oklch(from var(--border) l c h / 0.5);
 }
 
+.toast-surface {
+  background: oklch(from var(--card) l c h / 0.98);
+}
+
+[data-theme='dark'] .toast-surface {
+  background: oklch(from var(--card) l c h / 0.92);
+}
+
 /* 悬浮阴影效果 */
 .shadow-float {
   box-shadow:
-    0 10px 30px -5px rgba(0, 0, 0, 0.1),
-    0 5px 15px -3px rgba(0, 0, 0, 0.05);
+    0 10px 30px -5px oklch(0 0 0 / 0.1),
+    0 5px 15px -3px oklch(0 0 0 / 0.05);
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .shadow-float:hover {
   transform: translateY(-2px);
   box-shadow:
-    0 20px 40px -5px rgba(0, 0, 0, 0.15),
-    0 10px 25px -3px rgba(0, 0, 0, 0.08);
+    0 20px 40px -5px oklch(0 0 0 / 0.15),
+    0 10px 25px -3px oklch(0 0 0 / 0.08);
 }
 
 [data-theme='dark'] .shadow-float {
   box-shadow:
-    0 10px 30px -5px rgba(0, 0, 0, 0.3),
-    0 5px 15px -3px rgba(0, 0, 0, 0.2);
+    0 10px 30px -5px oklch(0 0 0 / 0.3),
+    0 5px 15px -3px oklch(0 0 0 / 0.2);
 }
 
 [data-theme='dark'] .shadow-float:hover {
   box-shadow:
-    0 20px 40px -5px rgba(0, 0, 0, 0.4),
-    0 10px 25px -3px rgba(0, 0, 0, 0.25);
+    0 20px 40px -5px oklch(0 0 0 / 0.4),
+    0 10px 25px -3px oklch(0 0 0 / 0.25);
 }
 
 /* 按钮样式 */
@@ -218,10 +226,34 @@ select.input option {
   border-radius: calc(var(--radius) * 1.5);
   border: 1px solid var(--border);
   box-shadow:
-    0 10px 30px -5px rgba(0, 0, 0, 0.1),
-    0 5px 15px -3px rgba(0, 0, 0, 0.05);
+    0 10px 30px -5px oklch(0 0 0 / 0.1),
+    0 5px 15px -3px oklch(0 0 0 / 0.05);
   padding: 1.5rem;
   color: var(--card-foreground);
+}
+
+/* 弹窗/模态框中的卡片 - 不使用 backdrop-filter 以避免透明问题 */
+.card-solid {
+  background-color: var(--card);
+  border-radius: calc(var(--radius) * 1.5);
+  border: 1px solid var(--border);
+  box-shadow:
+    0 10px 30px -5px oklch(0 0 0 / 0.1),
+    0 5px 15px -3px oklch(0 0 0 / 0.05);
+  padding: 1.5rem;
+  color: var(--card-foreground);
+}
+
+[data-theme='dark'] .card {
+  box-shadow:
+    0 10px 30px -5px oklch(0 0 0 / 0.3),
+    0 5px 15px -3px oklch(0 0 0 / 0.2);
+}
+
+[data-theme='dark'] .card-solid {
+  box-shadow:
+    0 10px 30px -5px oklch(0 0 0 / 0.3),
+    0 5px 15px -3px oklch(0 0 0 / 0.2);
 }
 
 /* 复选框样式 */
@@ -308,6 +340,17 @@ select.input option {
   }
 }
 
+@keyframes bookmark-dot-bounce {
+  0%, 80%, 100% {
+    transform: translateY(0) scale(1);
+    opacity: 0.5;
+  }
+  40% {
+    transform: translateY(-8px) scale(1.2);
+    opacity: 1;
+  }
+}
+
 .animate-fade-in {
   animation: fadeIn 0.4s ease-out;
 }
@@ -358,8 +401,12 @@ select.input option {
 }
 
 .modal::backdrop {
-  background: rgba(0, 0, 0, 0.5);
+  background: oklch(0 0 0 / 0.5);
   backdrop-filter: blur(4px);
+}
+
+[data-theme='dark'] .modal::backdrop {
+  background: oklch(0 0 0 / 0.7);
 }
 
 .modal-box {
@@ -368,12 +415,18 @@ select.input option {
   border-radius: calc(var(--radius) * 2);
   padding: 2.5rem 2rem 2rem;
   box-shadow:
-    0 25px 50px -12px rgba(0, 0, 0, 0.25),
-    0 10px 20px -5px rgba(0, 0, 0, 0.1);
+    0 25px 50px -12px oklch(0 0 0 / 0.25),
+    0 10px 20px -5px oklch(0 0 0 / 0.1);
   border: 1px solid var(--border);
   max-width: 28rem;
   width: 100%;
   animation: modalFadeIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+[data-theme='dark'] .modal-box {
+  box-shadow:
+    0 25px 50px -12px oklch(0 0 0 / 0.5),
+    0 10px 20px -5px oklch(0 0 0 / 0.3);
 }
 
 @keyframes modalFadeIn {
@@ -432,4 +485,30 @@ select.input option {
 
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
+}
+
+/* 主题滚动条（用于局部需要显示滚动条的容器） */
+.scrollbar-theme {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.scrollbar-theme::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.scrollbar-theme::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-theme::-webkit-scrollbar-thumb {
+  background-color: var(--border);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.scrollbar-theme::-webkit-scrollbar-thumb:hover {
+  background-color: var(--muted-foreground);
 }

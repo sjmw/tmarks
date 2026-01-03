@@ -11,7 +11,7 @@ import { logApiKeyUsage } from '../lib/api-key/logger'
 import { unauthorized, forbidden, tooManyRequests } from '../lib/response'
 import { hasPermission } from '../../shared/permissions'
 
-export interface ApiKeyAuthContext {
+export interface ApiKeyAuthContext extends Record<string, unknown> {
   user_id: string
   api_key_id: string
   api_key_permissions: string[]
@@ -60,27 +60,31 @@ export function requireApiKeyAuth(
         })
       }
 
-      // 4. 检查速率限制
-      const rateLimitResult = await checkRateLimit(keyData.id, context.env.RATE_LIMIT_KV)
+      // 4. 检查速率限制（如果未配置 KV，则跳过限流，但仍允许请求）
+      const kv = context.env.TMARKS_KV
 
-      if (!rateLimitResult.allowed) {
-        return tooManyRequests(
-          {
-            code: 'RATE_LIMIT_EXCEEDED',
-            message: 'Rate limit exceeded',
-            retry_after: rateLimitResult.retryAfter,
-          },
-          {
-            'X-RateLimit-Limit': String(rateLimitResult.limit),
-            'X-RateLimit-Remaining': String(rateLimitResult.remaining),
-            'X-RateLimit-Reset': String(rateLimitResult.reset),
-            'Retry-After': String(rateLimitResult.retryAfter || 60),
-          }
-        )
+      if (kv) {
+        const rateLimitResult = await checkRateLimit(keyData.id, kv)
+
+        if (!rateLimitResult.allowed) {
+          return tooManyRequests(
+            {
+              code: 'RATE_LIMIT_EXCEEDED',
+              message: 'Rate limit exceeded',
+              retry_after: rateLimitResult.retryAfter,
+            },
+            {
+              'X-RateLimit-Limit': String(rateLimitResult.limit),
+              'X-RateLimit-Remaining': String(rateLimitResult.remaining),
+              'X-RateLimit-Reset': String(rateLimitResult.reset),
+              'Retry-After': String(rateLimitResult.retryAfter || 60),
+            }
+          )
+        }
+
+        // 5. 记录请求（同步，确保计数准确）
+        await recordRequest(keyData.id, kv)
       }
-
-      // 5. 记录请求（同步，确保计数准确）
-      await recordRequest(keyData.id, context.env.RATE_LIMIT_KV)
 
       // 6. 获取请求 IP
       const ip =

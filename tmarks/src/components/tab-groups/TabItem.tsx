@@ -1,4 +1,5 @@
 import { ExternalLink, Trash2, Edit2, Pin, CheckSquare, Check, X, GripVertical, FolderInput, MoreVertical } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import type { TabGroupItem } from '@/lib/types'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
@@ -13,7 +14,7 @@ interface TabItemProps {
   batchMode: boolean
   editingItemId: string | null
   editingTitle: string
-  onItemClick: (item: TabGroupItem, e: React.MouseEvent) => void
+  onItemClick: (item: TabGroupItem, e: React.MouseEvent | React.ChangeEvent<HTMLInputElement>) => void
   onEditItem: (item: TabGroupItem) => void
   onSaveEdit: (groupId: string, itemId: string) => void
   onTogglePin: (groupId: string, itemId: string, currentPinned: number) => void
@@ -44,6 +45,7 @@ export function TabItem({
   setEditingTitle,
   extractDomain,
 }: TabItemProps) {
+  const { t } = useTranslation('tabGroups')
   const isMobile = useIsMobile()
 
   const {
@@ -51,14 +53,16 @@ export function TabItem({
     listeners,
     setNodeRef,
     transform,
-    transition,
     isDragging,
-  } = useSortable({ id: item.id })
+  } = useSortable({
+    id: item.id,
+    animateLayoutChanges: () => false, // 禁用布局动画，避免闪烁
+  })
 
   const style = {
     transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : 1,
+    transition: 'none', // 完全禁用 transition，避免从下往上拖拽时闪烁
+    opacity: isDragging ? 0.4 : 1,
   }
 
   const isEditing = editingItemId === item.id
@@ -67,7 +71,7 @@ export function TabItem({
     <div
       ref={setNodeRef}
       style={style}
-      className={`group flex items-center gap-3 rounded border transition-all ${
+      className={`group flex items-center gap-3 rounded border ${
         isMobile ? 'p-4 min-h-[60px]' : 'p-3'
       } ${
         isHighlighted
@@ -95,7 +99,7 @@ export function TabItem({
           checked={isSelected}
           onChange={(e) => {
             e.stopPropagation()
-            onItemClick(item, e as any)
+            onItemClick(item, e)
           }}
           className="checkbox"
         />
@@ -103,11 +107,19 @@ export function TabItem({
 
       {/* Favicon */}
       <img
-        src={`https://www.google.com/s2/favicons?domain=${extractDomain(item.url)}&sz=32`}
+        src={item.favicon || `https://www.google.com/s2/favicons?domain=${extractDomain(item.url)}&sz=32`}
         alt=""
         className="w-5 h-5 flex-shrink-0"
         onError={(e) => {
-          e.currentTarget.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg>'
+          const target = e.currentTarget
+          const googleFaviconUrl = `https://www.google.com/s2/favicons?domain=${extractDomain(item.url)}&sz=32`
+          // 如果当前不是 Google Favicon API，先尝试它
+          if (!target.src.includes('google.com/s2/favicons')) {
+            target.src = googleFaviconUrl
+          } else {
+            // 最终回退到默认图标
+            target.src = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="%236b7280" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>')
+          }
         }}
       />
 
@@ -160,20 +172,20 @@ export function TabItem({
               <button
                 onClick={() => onSaveEdit(groupId, item.id)}
                 className="p-1.5 text-success hover:bg-success/10 rounded transition-colors"
-                title="保存"
+                title={t('item.save')}
               >
                 <Check className="w-4 h-4" />
               </button>
               <button
                 onClick={() => setEditingItemId(null)}
                 className="p-1.5 text-muted-foreground hover:bg-muted rounded transition-colors"
-                title="取消"
+                title={t('item.cancel')}
               >
                 <X className="w-4 h-4" />
               </button>
             </>
           ) : isMobile ? (
-            /* 移动端：使用下拉菜单 */
+            /* Mobile: use dropdown menu */
             <DropdownMenu
               trigger={
                 <button className="p-2 text-muted-foreground hover:bg-muted rounded transition-colors">
@@ -182,32 +194,32 @@ export function TabItem({
               }
               items={[
                 {
-                  label: '打开链接',
+                  label: t('menu.openLink'),
                   icon: <ExternalLink className="w-4 h-4" />,
                   onClick: () => window.open(item.url, '_blank'),
                 },
                 {
-                  label: '编辑',
+                  label: t('item.edit'),
                   icon: <Edit2 className="w-4 h-4" />,
                   onClick: () => onEditItem(item),
                 },
                 {
-                  label: item.is_pinned === 1 ? '取消固定' : '固定',
+                  label: item.is_pinned === 1 ? t('menu.unpin') : t('menu.pin'),
                   icon: <Pin className="w-4 h-4" />,
                   onClick: () => onTogglePin(groupId, item.id, item.is_pinned || 0),
                 },
                 {
-                  label: item.is_todo === 1 ? '取消待办' : '标记待办',
+                  label: item.is_todo === 1 ? t('menu.unmarkTodo') : t('menu.markTodo'),
                   icon: <CheckSquare className="w-4 h-4" />,
                   onClick: () => onToggleTodo(groupId, item.id, item.is_todo || 0),
                 },
                 ...(onMoveItem ? [{
-                  label: '移动到其他组',
+                  label: t('menu.moveToOtherGroup'),
                   icon: <FolderInput className="w-4 h-4" />,
                   onClick: () => onMoveItem(item),
                 }] : []),
                 {
-                  label: '删除',
+                  label: t('item.delete'),
                   icon: <Trash2 className="w-4 h-4" />,
                   onClick: () => onDeleteItem(groupId, item.id, item.title),
                   danger: true,
@@ -215,21 +227,21 @@ export function TabItem({
               ]}
             />
           ) : (
-            /* 桌面端：显示所有按钮 */
+            /* Desktop: show all buttons */
             <>
               <a
                 href={item.url}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="p-1.5 text-muted-foreground hover:bg-muted rounded transition-colors"
-                title="打开链接"
+                title={t('menu.openLink')}
               >
                 <ExternalLink className="w-4 h-4" />
               </a>
               <button
                 onClick={() => onEditItem(item)}
                 className="p-1.5 text-muted-foreground hover:bg-muted rounded transition-colors"
-                title="编辑"
+                title={t('item.edit')}
               >
                 <Edit2 className="w-4 h-4" />
               </button>
@@ -240,7 +252,7 @@ export function TabItem({
                     ? 'text-warning bg-warning/10 hover:bg-warning/20'
                     : 'text-muted-foreground hover:bg-muted'
                 }`}
-                title={item.is_pinned === 1 ? '取消固定' : '固定'}
+                title={item.is_pinned === 1 ? t('menu.unpin') : t('menu.pin')}
               >
                 <Pin className="w-4 h-4" />
               </button>
@@ -251,7 +263,7 @@ export function TabItem({
                     ? 'text-accent bg-accent/10 hover:bg-accent/20'
                     : 'text-muted-foreground hover:bg-muted'
                 }`}
-                title={item.is_todo === 1 ? '取消待办' : '标记待办'}
+                title={item.is_todo === 1 ? t('menu.unmarkTodo') : t('menu.markTodo')}
               >
                 <CheckSquare className="w-4 h-4" />
               </button>
@@ -259,7 +271,7 @@ export function TabItem({
                 <button
                   onClick={() => onMoveItem(item)}
                   className="p-1.5 text-muted-foreground hover:bg-muted rounded transition-colors"
-                  title="移动到其他组"
+                  title={t('menu.moveToOtherGroup')}
                 >
                   <FolderInput className="w-4 h-4" />
                 </button>
@@ -267,7 +279,7 @@ export function TabItem({
               <button
                 onClick={() => onDeleteItem(groupId, item.id, item.title)}
                 className="p-1.5 text-destructive hover:bg-destructive/10 rounded transition-colors"
-                title="删除"
+                title={t('item.delete')}
               >
                 <Trash2 className="w-4 h-4" />
               </button>

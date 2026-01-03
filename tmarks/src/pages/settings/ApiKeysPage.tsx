@@ -1,52 +1,97 @@
 /**
- * API Keys 管理页面
+ * API Keys Management Page
  */
 
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useApiKeys, useRevokeApiKey, useDeleteApiKey } from '@/hooks/useApiKeys'
 import { CreateApiKeyModal } from '@/components/api-keys/CreateApiKeyModal'
 import { ApiKeyCard } from '@/components/api-keys/ApiKeyCard'
 import { ApiKeyDetailModal } from '@/components/api-keys/ApiKeyDetailModal'
+import { ConfirmDialog } from '@/components/common/ConfirmDialog'
+import { AlertDialog } from '@/components/common/AlertDialog'
 import type { ApiKey } from '@/services/api-keys'
 
 export function ApiKeysPage() {
+  const { t } = useTranslation('settings')
+  const { t: tCommon } = useTranslation('common')
   const { data, isLoading } = useApiKeys()
   const revokeApiKey = useRevokeApiKey()
   const deleteApiKey = useDeleteApiKey()
 
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [selectedKey, setSelectedKey] = useState<ApiKey | null>(null)
+  const [confirmState, setConfirmState] = useState<{
+    isOpen: boolean
+    title: string
+    message: string
+    onConfirm: () => void
+  } | null>(null)
+  const [alertState, setAlertState] = useState<{
+    isOpen: boolean
+    title: string
+    message: string
+    type: 'success' | 'error' | 'info' | 'warning'
+  } | null>(null)
 
   const handleRevoke = async (id: string) => {
-    if (!confirm('确定要撤销此 API Key 吗？撤销后无法恢复。')) {
-      return
-    }
-
-    try {
-      await revokeApiKey.mutateAsync(id)
-      alert('API Key 已撤销')
-    } catch {
-      alert('撤销失败，请重试')
-    }
+    setConfirmState({
+      isOpen: true,
+      title: t('apiKey.page.revokeTitle'),
+      message: t('apiKey.page.revokeMessage'),
+      onConfirm: async () => {
+        setConfirmState(null)
+        try {
+          await revokeApiKey.mutateAsync(id)
+          setAlertState({
+            isOpen: true,
+            title: tCommon('dialog.successTitle'),
+            message: t('apiKey.page.revokeSuccess'),
+            type: 'success',
+          })
+        } catch {
+          setAlertState({
+            isOpen: true,
+            title: tCommon('dialog.errorTitle'),
+            message: t('apiKey.page.revokeFailed'),
+            type: 'error',
+          })
+        }
+      },
+    })
   }
 
   const handleDelete = async (id: string) => {
-    if (!confirm('确定要彻底删除此 API Key 吗？该操作不可恢复，并会清除所有使用记录。')) {
-      return
-    }
-
-    try {
-      await deleteApiKey.mutateAsync(id)
-      alert('API Key 已永久删除')
-    } catch {
-      alert('删除失败，请重试')
-    }
+    setConfirmState({
+      isOpen: true,
+      title: t('apiKey.page.deleteTitle'),
+      message: t('apiKey.page.deleteMessage'),
+      onConfirm: async () => {
+        setConfirmState(null)
+        try {
+          await deleteApiKey.mutateAsync(id)
+          setAlertState({
+            isOpen: true,
+            title: tCommon('dialog.successTitle'),
+            message: t('apiKey.page.deleteSuccess'),
+            type: 'success',
+          })
+        } catch {
+          setAlertState({
+            isOpen: true,
+            title: tCommon('dialog.errorTitle'),
+            message: t('apiKey.page.deleteFailed'),
+            type: 'error',
+          })
+        }
+      },
+    })
   }
 
   if (isLoading) {
     return (
       <div className="container mx-auto px-4 py-8 max-w-5xl">
-        <div className="text-center text-muted-foreground">加载中...</div>
+        <div className="text-center text-muted-foreground">{tCommon('status.loading')}</div>
       </div>
     )
   }
@@ -55,40 +100,68 @@ export function ApiKeysPage() {
   const quota = data?.quota || { used: 0, limit: 3 }
 
   return (
-    <div className="container mx-auto px-3 sm:px-4 py-6 sm:py-8 max-w-5xl">
-      <div className="card">
-        {/* 标题栏 */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
-          <h1 className="text-xl sm:text-2xl font-bold text-foreground">API Keys 管理</h1>
+    <div className="w-full space-y-4 sm:space-y-6">
+      {confirmState && (
+        <ConfirmDialog
+          isOpen={confirmState.isOpen}
+          title={confirmState.title}
+          message={confirmState.message}
+          type="warning"
+          onConfirm={confirmState.onConfirm}
+          onCancel={() => setConfirmState(null)}
+        />
+      )}
+
+      {alertState && (
+        <AlertDialog
+          isOpen={alertState.isOpen}
+          title={alertState.title}
+          message={alertState.message}
+          type={alertState.type}
+          onConfirm={() => setAlertState(null)}
+        />
+      )}
+
+      {/* Title card */}
+      <div className="card p-4 sm:p-6">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <h1 className="text-xl sm:text-2xl font-bold text-foreground">{t('apiKey.page.title')}</h1>
+            <p className="text-sm text-muted-foreground mt-1">
+              {t('apiKey.page.description')}
+            </p>
+          </div>
           <button
             className="btn btn-primary w-full sm:w-auto touch-manipulation"
             onClick={() => setShowCreateModal(true)}
             disabled={quota.used >= quota.limit}
           >
-            + 创建新的 API Key
+            + {t('apiKey.page.createNew')}
           </button>
         </div>
+      </div>
 
-        {/* 说明文字 */}
+      {/* Content card */}
+      <div className="card p-4 sm:p-6">
+        {/* Info text */}
         <div className="mb-4 sm:mb-6 p-3 sm:p-4 bg-muted/30 border border-border rounded-lg">
           <p className="text-xs sm:text-sm text-muted-foreground mb-2 leading-relaxed">
-            API Keys 用于第三方应用（如浏览器插件）安全访问您的 TMarks 数据。
-            您可以随时撤销不需要的 Key。
+            {t('apiKey.page.info')}
           </p>
           <p className="text-xs sm:text-sm text-muted-foreground">
-            当前使用: <strong>{quota.used} / {quota.limit >= 999 ? '无限制' : quota.limit}</strong>
+            {t('apiKey.page.currentUsage')}: <strong>{quota.used} / {quota.limit >= 999 ? t('apiKey.page.unlimited') : quota.limit}</strong>
           </p>
         </div>
 
-        {/* API Keys 列表 */}
+        {/* API Keys list */}
         {keys.length === 0 ? (
           <div className="text-center py-8 sm:py-12">
-            <p className="text-sm sm:text-base text-muted-foreground mb-4">还没有创建任何 API Key</p>
+            <p className="text-sm sm:text-base text-muted-foreground mb-4">{t('apiKey.page.empty')}</p>
             <button
               className="btn btn-primary w-full sm:w-auto touch-manipulation"
               onClick={() => setShowCreateModal(true)}
             >
-              创建第一个 API Key
+              {t('apiKey.page.createFirst')}
             </button>
           </div>
         ) : (
@@ -105,13 +178,13 @@ export function ApiKeysPage() {
           </div>
         )}
 
-        {/* 提示信息 */}
+        {/* Tips */}
         <div className="mt-6 p-4 bg-info/10 border border-info/30 rounded-lg">
-          <h4 className="font-medium text-info mb-2">💡 提示：</h4>
+          <h4 className="font-medium text-info mb-2">{t('apiKey.page.tipsTitle')}</h4>
           <ul className="text-xs text-muted-foreground space-y-1 list-disc list-inside">
-            <li>每个账户最多创建 {quota.limit >= 999 ? '无限制' : `${quota.limit} 个`} API Key</li>
-            <li>API Key 创建后仅显示一次，请妥善保存</li>
-            <li>如果 Key 泄露，请立即撤销</li>
+            <li>{t('apiKey.page.tip1', { limit: quota.limit >= 999 ? t('apiKey.page.unlimited') : quota.limit })}</li>
+            <li>{t('apiKey.page.tip2')}</li>
+            <li>{t('apiKey.page.tip3')}</li>
           </ul>
         </div>
       </div>

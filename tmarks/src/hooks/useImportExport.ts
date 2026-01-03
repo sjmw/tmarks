@@ -26,8 +26,8 @@ interface UseImportExportReturn {
   importError: string | null
   
   // 预览相关
-  getExportPreview: () => Promise<any>
-  getImportPreview: (format: ImportFormat) => Promise<any>
+  getExportPreview: () => Promise<unknown>
+  getImportPreview: (format: ImportFormat) => Promise<unknown>
   
   // 状态重置
   clearErrors: () => void
@@ -266,7 +266,7 @@ export function getDefaultImportOptions(format: ImportFormat): ImportOptions {
     preserve_timestamps: true,
     batch_size: 50,
     max_concurrent: 5,
-    default_tag_color: '#3b82f6',
+    default_tag_color: 'hsl(var(--primary))',
     folder_as_tag: true
   }
 

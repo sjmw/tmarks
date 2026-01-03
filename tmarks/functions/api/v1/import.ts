@@ -10,8 +10,10 @@ import type {
   ImportFormat,
   ImportOptions,
   ImportResult,
+  ImportData,
   ParsedBookmark,
-  ParsedTag
+  ParsedTag,
+  ParsedTabGroup
 } from '../../../shared/import-export-types'
 
 import { createHtmlParser } from '../../lib/import-export/parsers/html-parser'
@@ -23,6 +25,10 @@ interface ImportRequest {
   content: string
   options?: Partial<ImportOptions>
 }
+
+// 配置常量
+const MAX_IMPORT_SIZE = 10 * 1024 * 1024 // 10MB
+const IMPORT_TIMEOUT = 5 * 60 * 1000 // 5分钟
 
 export const onRequestPost: PagesFunction<Env, RouteParams, AuthContext>[] = [
   requireAuth,
@@ -36,6 +42,19 @@ export const onRequestPost: PagesFunction<Env, RouteParams, AuthContext>[] = [
         return new Response(
           JSON.stringify({ error: 'Missing required fields: format and content' }),
           { status: 400, headers: { 'Content-Type': 'application/json' } }
+        )
+      }
+
+      // 检查文件大小
+      const contentSize = new Blob([content]).size
+      if (contentSize > MAX_IMPORT_SIZE) {
+        return new Response(
+          JSON.stringify({
+            error: 'File too large',
+            message: `Import file size (${(contentSize / 1024 / 1024).toFixed(2)}MB) exceeds maximum allowed size (${MAX_IMPORT_SIZE / 1024 / 1024}MB)`,
+            suggestion: 'Please split your import file into smaller chunks or contact support for assistance.'
+          }),
+          { status: 413, headers: { 'Content-Type': 'application/json' } }
         )
       }
 
@@ -58,13 +77,15 @@ export const onRequestPost: PagesFunction<Env, RouteParams, AuthContext>[] = [
         )
       }
 
-      // 执行导入
-      const result = await performImport(
-        context.env.DB,
-        userId,
-        importData,
-        options
-      )
+      // 执行导入（带超时保护）
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('Import timeout - operation took too long')), IMPORT_TIMEOUT)
+      })
+
+      const result = await Promise.race([
+        performImport(context.env.DB, userId, importData, options),
+        timeoutPromise
+      ])
 
       return new Response(
         JSON.stringify(result),
@@ -108,7 +129,7 @@ async function parseImportData(format: ImportFormat, content: string) {
 /**
  * 验证导入数据
  */
-async function validateImportData(format: ImportFormat, data: any) {
+async function validateImportData(format: ImportFormat, data: ImportData) {
   switch (format) {
     case 'html': {
       const htmlParser = createHtmlParser()
@@ -132,7 +153,7 @@ async function validateImportData(format: ImportFormat, data: any) {
 async function performImport(
   db: D1Database, 
   userId: string, 
-  importData: any, 
+  importData: ImportData, 
   options: ImportOptions
 ): Promise<ImportResult> {
   const result: ImportResult = {
@@ -142,7 +163,10 @@ async function performImport(
     total: importData.bookmarks.length,
     errors: [],
     created_bookmarks: [],
-    created_tags: []
+    created_tags: [],
+    created_tab_groups: [],
+    tab_groups_success: 0,
+    tab_groups_failed: 0
   }
 
   try {
@@ -161,6 +185,11 @@ async function performImport(
     
     for (const batch of batches) {
       await processBatch(db, userId, batch, existingUrls, result, options)
+    }
+
+    // 4. 导入标签页组
+    if (importData.tab_groups && importData.tab_groups.length > 0) {
+      await importTabGroups(db, userId, importData.tab_groups, result, options)
     }
 
     return result
@@ -186,7 +215,7 @@ async function createTags(
     'SELECT name FROM tags WHERE user_id = ? AND deleted_at IS NULL'
   ).bind(userId).all()
 
-  const existingTagNames = new Set((existingTags || []).map((tag: any) => tag.name))
+  const existingTagNames = new Set((existingTags || []).map((tag: Record<string, unknown>) => String(tag.name)))
 
   // 创建新标签
   for (const tag of tags) {
@@ -219,7 +248,7 @@ async function getExistingUrls(db: D1Database, userId: string): Promise<Set<stri
     'SELECT url FROM bookmarks WHERE user_id = ? AND deleted_at IS NULL'
   ).bind(userId).all()
 
-  return new Set((bookmarks || []).map((bookmark: any) => bookmark.url))
+  return new Set((bookmarks || []).map((bookmark: Record<string, unknown>) => String(bookmark.url)))
 }
 
 /**
@@ -368,6 +397,7 @@ async function createBookmark(
 
 /**
  * 关联书签和标签
+ * 使用优化的 createOrLinkTags 函数自动创建和链接标签
  */
 async function associateBookmarkTags(
   db: D1Database,
@@ -375,28 +405,15 @@ async function associateBookmarkTags(
   bookmarkId: string,
   tagNames: string[]
 ) {
-  // 获取标签ID
-  interface TagRow {
-    id: string
-    name: string
-  }
+  // 导入 createOrLinkTags 函数
+  const { createOrLinkTags } = await import('../../lib/tags')
   
-  const placeholders = tagNames.map(() => '?').join(',')
-  const { results: tags } = await db.prepare(`
-    SELECT id, name FROM tags 
-    WHERE user_id = ? AND name IN (${placeholders}) AND deleted_at IS NULL
-  `).bind(userId, ...tagNames).all<TagRow>()
-
-  // 创建关联
-  for (const tag of tags || []) {
-    try {
-      await db.prepare(`
-        INSERT OR IGNORE INTO bookmark_tags (bookmark_id, tag_id, user_id, created_at)
-        VALUES (?, ?, ?, datetime('now'))
-      `).bind(bookmarkId, tag.id, userId).run()
-    } catch (error) {
-      console.error('Failed to associate tag:', tag.name, error)
-    }
+  try {
+    // 使用批量处理函数（自动创建不存在的标签并链接）
+    await createOrLinkTags(db, bookmarkId, tagNames, userId)
+  } catch (error) {
+    console.error('Failed to associate tags:', error)
+    throw error
   }
 }
 
@@ -436,6 +453,115 @@ async function ensureUncategorizedTag(
   } catch (error) {
     console.error('Failed to add uncategorized tag:', error)
     // 不抛出错误,允许书签创建成功
+  }
+}
+
+/**
+ * 导入标签页组
+ */
+async function importTabGroups(
+  db: D1Database,
+  userId: string,
+  tabGroups: ParsedTabGroup[],
+  result: ImportResult,
+  options: ImportOptions
+) {
+  // 用于映射旧ID到新ID（处理父子关系）
+  const idMapping = new Map<string, string>()
+
+  // 先按层级排序，确保父组先创建
+  const sortedGroups = [...tabGroups].sort((a, b) => {
+    if (!a.parent_id && b.parent_id) return -1
+    if (a.parent_id && !b.parent_id) return 1
+    return a.position - b.position
+  })
+
+  for (const group of sortedGroups) {
+    try {
+      const now = new Date().toISOString()
+      const createdAt = options.preserve_timestamps && group.created_at
+        ? group.created_at
+        : now
+      const updatedAt = options.preserve_timestamps && group.updated_at
+        ? group.updated_at
+        : now
+
+      // 生成新ID
+      const newGroupId = crypto.randomUUID()
+      
+      // 如果有旧ID，记录映射
+      if (group.id) {
+        idMapping.set(group.id, newGroupId)
+      }
+
+      // 处理父ID映射
+      let parentId: string | null = null
+      if (group.parent_id) {
+        parentId = idMapping.get(group.parent_id) || null
+      }
+
+      // 创建标签页组
+      await db.prepare(`
+        INSERT INTO tab_groups (
+          id, user_id, title, parent_id, is_folder, position, color, tags,
+          created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).bind(
+        newGroupId,
+        userId,
+        group.title,
+        parentId,
+        group.is_folder ? 1 : 0,
+        group.position,
+        group.color || null,
+        group.tags || null,
+        createdAt,
+        updatedAt
+      ).run()
+
+      result.created_tab_groups.push(newGroupId)
+
+      // 导入标签页组项目
+      if (group.items && group.items.length > 0) {
+        for (const item of group.items) {
+          try {
+            const itemId = crypto.randomUUID()
+            const itemCreatedAt = options.preserve_timestamps && item.created_at
+              ? item.created_at
+              : now
+
+            await db.prepare(`
+              INSERT INTO tab_group_items (
+                id, group_id, user_id, title, url, favicon, position,
+                is_pinned, is_todo, is_archived, created_at, updated_at
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `).bind(
+              itemId,
+              newGroupId,
+              userId,
+              item.title,
+              item.url,
+              item.favicon || null,
+              item.position,
+              item.is_pinned ? 1 : 0,
+              item.is_todo ? 1 : 0,
+              item.is_archived ? 1 : 0,
+              itemCreatedAt,
+              now
+            ).run()
+          } catch (itemError) {
+            console.error('Failed to create tab group item:', item.url, itemError)
+            // 继续处理其他项目
+          }
+        }
+      }
+
+      result.tab_groups_success++
+
+    } catch (error) {
+      console.error('Failed to create tab group:', group.title, error)
+      result.tab_groups_failed++
+    }
   }
 }
 

@@ -5,15 +5,22 @@ import { requireAuth, AuthContext } from '../../../middleware/auth'
 import { isValidUrl, sanitizeString } from '../../../lib/validation'
 import { filterRateLimiter } from '../../../lib/rate-limit'
 import { generateUUID } from '../../../lib/crypto'
-import { normalizeBookmark } from '../../bookmarks/utils'
+import { normalizeBookmark } from '../../../lib/bookmark-utils'
 import { invalidatePublicShareCache } from '../../shared/cache'
+import { CacheService } from '../../../lib/cache'
+import { createBookmarkCacheManager } from '../../../lib/cache/bookmark-cache'
+import type { QueryParams } from '../../../lib/cache/types'
+import { createOrLinkTags } from '../../../lib/tags'
+import { uploadCoverImageToR2 } from '../../../lib/image-upload'
 
 interface CreateBookmarkRequest {
   title: string
   url: string
   description?: string
   cover_image?: string
-  tag_ids?: string[]
+  favicon?: string
+  tag_ids?: string[]  // 兼容旧版：标签 ID 数组
+  tags?: string[]     // 新版：标签名称数组（推荐）
   is_pinned?: boolean
   is_archived?: boolean
   is_public?: boolean
@@ -40,6 +47,29 @@ export const onRequestGet: PagesFunction<Env, RouteParams, AuthContext>[] = [
       const sortBy = url.searchParams.get('sort') || 'created' // created, updated, pinned
       const isArchived = url.searchParams.get('archived') === 'true'
       const isPinned = url.searchParams.get('pinned') === 'true'
+
+      // 初始化缓存服务
+      const cache = new CacheService(context.env)
+      const bookmarkCache = createBookmarkCacheManager(cache)
+
+      // 构建查询参数对象
+      const queryParams: QueryParams = {
+        keyword: keyword || undefined,
+        tags: tagIds.length > 0 ? tagIds : undefined,
+        archived: isArchived || undefined,
+        pinned: isPinned || undefined,
+        sort: sortBy !== 'created' ? sortBy : undefined,
+        page_cursor: pageCursor || undefined,
+      }
+
+      // 尝试从缓存获取 (只缓存默认列表查询)
+      const cached = await bookmarkCache.getBookmarkList(userId, queryParams)
+      if (cached) {
+        return success({
+          ...cached,
+          _cached: true, // 标记为缓存数据
+        })
+      }
 
       // 记录标签点击统计(异步执行,不阻塞主查询)
       if (tagIds.length > 0) {
@@ -103,21 +133,21 @@ export const onRequestGet: PagesFunction<Env, RouteParams, AuthContext>[] = [
         params = conditionParams
       }
 
-      // 排序
+      // 排序（置顶书签按 pin_order 排序）
       let orderBy = ''
       switch (sortBy) {
         case 'updated':
-          orderBy = 'ORDER BY b.is_pinned DESC, b.updated_at DESC, b.id DESC'
+          orderBy = 'ORDER BY b.is_pinned DESC, CASE WHEN b.is_pinned = 1 THEN b.pin_order ELSE NULL END ASC, b.updated_at DESC, b.id DESC'
           break
         case 'pinned':
-          orderBy = 'ORDER BY b.is_pinned DESC, b.created_at DESC, b.id DESC'
+          orderBy = 'ORDER BY b.is_pinned DESC, CASE WHEN b.is_pinned = 1 THEN b.pin_order ELSE NULL END ASC, b.created_at DESC, b.id DESC'
           break
         case 'popular':
-          orderBy = 'ORDER BY b.is_pinned DESC, b.click_count DESC, b.last_clicked_at DESC, b.id DESC'
+          orderBy = 'ORDER BY b.is_pinned DESC, CASE WHEN b.is_pinned = 1 THEN b.pin_order ELSE NULL END ASC, b.click_count DESC, b.last_clicked_at DESC, b.id DESC'
           break
         case 'created':
         default:
-          orderBy = 'ORDER BY b.is_pinned DESC, b.created_at DESC, b.id DESC'
+          orderBy = 'ORDER BY b.is_pinned DESC, CASE WHEN b.is_pinned = 1 THEN b.pin_order ELSE NULL END ASC, b.created_at DESC, b.id DESC'
           break
       }
 
@@ -176,13 +206,38 @@ export const onRequestGet: PagesFunction<Env, RouteParams, AuthContext>[] = [
         }
       }
 
+      // 一次性获取所有书签的快照数量
+      const snapshotCounts = new Map<string, number>()
+      
+      if (bookmarkIds.length > 0) {
+        try {
+          const placeholders = bookmarkIds.map(() => '?').join(',')
+          const { results: countResults } = await context.env.DB.prepare(
+            `SELECT bookmark_id, COUNT(*) as count
+             FROM bookmark_snapshots
+             WHERE bookmark_id IN (${placeholders})
+             GROUP BY bookmark_id`
+          )
+            .bind(...bookmarkIds)
+            .all<{ bookmark_id: string; count: number }>()
+
+          for (const row of countResults || []) {
+            snapshotCounts.set(row.bookmark_id, row.count)
+          }
+        } catch (snapshotError) {
+          // 如果快照表不存在，忽略错误（向后兼容）
+          console.warn('Failed to fetch snapshot counts (table may not exist):', snapshotError)
+        }
+      }
+
       // 组装书签和标签数据
       const bookmarksWithTags: BookmarkWithTags[] = bookmarks.map(bookmark => ({
         ...normalizeBookmark(bookmark),
         tags: tagsByBookmarkId.get(bookmark.id) || [],
+        snapshot_count: snapshotCounts.get(bookmark.id) || 0,
       }))
 
-      return success({
+      const responseData = {
         bookmarks: bookmarksWithTags,
         meta: {
           page_size: pageSize,
@@ -190,7 +245,12 @@ export const onRequestGet: PagesFunction<Env, RouteParams, AuthContext>[] = [
           next_cursor: nextCursor,
           has_more: hasMore,
         },
-      })
+      }
+
+      // 异步写入缓存 (不阻塞响应)
+      await bookmarkCache.setBookmarkList(userId, queryParams, responseData, { async: true })
+
+      return success(responseData)
     } catch (error) {
       console.error('Get bookmarks error:', error)
       return internalError('Failed to get bookmarks')
@@ -218,7 +278,8 @@ export const onRequestPost: PagesFunction<Env, RouteParams, AuthContext>[] = [
       const title = sanitizeString(body.title, 500)
       const url = sanitizeString(body.url, 2000)
       const description = body.description ? sanitizeString(body.description, 1000) : null
-      const coverImage = body.cover_image ? sanitizeString(body.cover_image, 2000) : null
+      let coverImage = body.cover_image ? sanitizeString(body.cover_image, 2000) : null
+      const favicon = body.favicon ? sanitizeString(body.favicon, 2000) : null
 
       // 检查URL是否已存在（包括已删除的）
       const existing = await context.env.DB.prepare(
@@ -233,17 +294,73 @@ export const onRequestPost: PagesFunction<Env, RouteParams, AuthContext>[] = [
       const isArchived = body.is_archived ? 1 : 0
       const isPublic = body.is_public ? 1 : 0
 
+      // 如果有封面图且配置了 R2 bucket，上传到 R2
+      let coverImageId: string | null = null
+      if (coverImage && context.env.SNAPSHOTS_BUCKET && context.env.R2_PUBLIC_URL) {
+        // 生成临时 ID（如果是新书签）
+        const tempBookmarkId = existing?.id || generateUUID()
+
+        const uploadResult = await uploadCoverImageToR2(
+          coverImage,
+          userId,
+          tempBookmarkId,
+          context.env.SNAPSHOTS_BUCKET,
+          context.env.DB,
+          context.env.R2_PUBLIC_URL,
+          context.env
+        )
+
+        // 如果上传成功，使用 R2 URL 和 imageId
+        if (uploadResult.success && uploadResult.r2Url) {
+          coverImage = uploadResult.r2Url
+          coverImageId = uploadResult.imageId || null
+        }
+        // 如果上传失败，继续使用原始 URL（降级方案）
+      }
+
       if (existing) {
-        // 如果是未删除的书签，返回错误
+        bookmarkId = existing.id
+        
+        // 如果是未删除的书签
         if (!existing.deleted_at) {
-          return badRequest('Bookmark with this URL already exists')
+          // 返回现有书签信息，让前端可以为其创建快照
+          const bookmarkRow = await context.env.DB.prepare('SELECT * FROM bookmarks WHERE id = ?')
+            .bind(bookmarkId)
+            .first<BookmarkRow>()
+
+          const { results: tags } = await context.env.DB.prepare(
+            `SELECT t.id, t.name, t.color
+             FROM tags t
+             INNER JOIN bookmark_tags bt ON t.id = bt.tag_id
+             WHERE bt.bookmark_id = ?`
+          )
+            .bind(bookmarkId)
+            .all<{ id: string; name: string; color: string | null }>()
+
+          if (!bookmarkRow) {
+            return internalError('Failed to retrieve bookmark')
+          }
+
+          const bookmark = normalizeBookmark(bookmarkRow)
+
+          return success(
+            {
+              bookmark: {
+                ...bookmark,
+                tags: tags || [],
+              },
+            },
+            {
+              message: 'Bookmark already exists',
+              code: 'BOOKMARK_EXISTS',
+            }
+          )
         }
 
         // 如果是已删除的书签，恢复并更新
-        bookmarkId = existing.id
         await context.env.DB.prepare(
           `UPDATE bookmarks
-           SET title = ?, description = ?, cover_image = ?,
+           SET title = ?, description = ?, cover_image = ?, cover_image_id = ?, favicon = ?,
                is_pinned = ?, is_archived = ?, is_public = ?,
                deleted_at = NULL, updated_at = ?
            WHERE id = ?`
@@ -252,6 +369,8 @@ export const onRequestPost: PagesFunction<Env, RouteParams, AuthContext>[] = [
             title,
             description,
             coverImage,
+            coverImageId,
+            favicon,
             isPinned,
             isArchived,
             isPublic,
@@ -270,8 +389,8 @@ export const onRequestPost: PagesFunction<Env, RouteParams, AuthContext>[] = [
         bookmarkId = bookmarkUuid
 
         await context.env.DB.prepare(
-          `INSERT INTO bookmarks (id, user_id, title, url, description, cover_image, is_pinned, is_archived, is_public, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO bookmarks (id, user_id, title, url, description, cover_image, cover_image_id, favicon, is_pinned, is_archived, is_public, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
           .bind(
             bookmarkUuid,
@@ -280,6 +399,8 @@ export const onRequestPost: PagesFunction<Env, RouteParams, AuthContext>[] = [
             url,
             description,
             coverImage,
+            coverImageId,
+            favicon,
             isPinned,
             isArchived,
             isPublic,
@@ -289,8 +410,12 @@ export const onRequestPost: PagesFunction<Env, RouteParams, AuthContext>[] = [
           .run()
       }
 
-      // 关联标签
-      if (body.tag_ids && body.tag_ids.length > 0) {
+      // 处理标签（支持两种方式）
+      if (body.tags && body.tags.length > 0) {
+        // 新版：直接传标签名称，后端自动创建或链接
+        await createOrLinkTags(context.env.DB, bookmarkId, body.tags, userId)
+      } else if (body.tag_ids && body.tag_ids.length > 0) {
+        // 兼容旧版：传标签 ID
         for (const tagId of body.tag_ids) {
           await context.env.DB.prepare(
             'INSERT INTO bookmark_tags (bookmark_id, tag_id, user_id, created_at) VALUES (?, ?, ?, ?)'
@@ -317,6 +442,11 @@ export const onRequestPost: PagesFunction<Env, RouteParams, AuthContext>[] = [
       if (!bookmarkRow) {
         return internalError('Failed to load bookmark after creation')
       }
+
+      // 失效缓存
+      const cache = new CacheService(context.env)
+      const bookmarkCache = createBookmarkCacheManager(cache)
+      await bookmarkCache.invalidateUserBookmarks(userId)
 
       if (body.is_public) {
         await invalidatePublicShareCache(context.env, userId)
